@@ -11,9 +11,12 @@ Narxoz Team Finder — Telegram-бот для поиска сокомандни�
 - /reopen       — вернуть анкету в ленту поиска
 - /delete       — удалить свою анкету навсегда
 - /language     — сменить язык интерфейса бота в любой момент
+- /export       — (только для админа) прислать файл базы данных целиком
+- /import       — (только для админа) восстановить базу из присланного файла
 
 Хранилище: локальный SQLite-файл (team_finder.db), создаётся автоматически.
-Нужен только токен бота от @BotFather.
+Нужен токен бота от @BotFather. Опционально: ADMIN_USER_ID — твой Telegram
+user id, чтобы только ты мог выгружать базу через /export (см. README).
 """
 
 import asyncio
@@ -27,13 +30,20 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import (
+    Message,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    CallbackQuery,
+    FSInputFile,
+)
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("team_finder")
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "PUT_YOUR_TOKEN_HERE")
 DB_PATH = os.path.join(os.path.dirname(__file__), "team_finder.db")
+ADMIN_USER_ID = os.environ.get("ADMIN_USER_ID")  # твой Telegram user id, строкой
 
 router = Router()
 
@@ -98,6 +108,23 @@ TEXT = {
         "lbl_contact": "✉️ Контакт:",
         "no_username": "(нет username, напишите через профиль Telegram)",
         "lang_changed": "Язык бота изменён на Русский.",
+        "fallback_hint": "Не совсем понял 🙂 Если ответ не подошёл — наберите /start, чтобы продолжить или начать заново.",
+        "export_denied": "Эта команда доступна только администратору бота.",
+        "export_caption": "База данных на {time}",
+        "ask_contact_method": "Как с вами лучше связаться?",
+        "btn_contact_telegram": "Telegram (@username)",
+        "btn_contact_phone": "📞 Номер телефона",
+        "btn_contact_email": "✉️ Email",
+        "no_username_notice": (
+            "У вас не задан username в Telegram (Настройки Telegram → Изменить профиль → Имя пользователя). "
+            "Выберите другой способ связи:"
+        ),
+        "ask_phone": "Введите номер телефона:",
+        "ask_email": "Введите email:",
+        "import_prompt": "Пришлите файл team_finder.db следующим сообщением (как документ), чтобы восстановить базу.",
+        "import_denied": "Эта команда доступна только администратору бота.",
+        "import_done": "База данных восстановлена из присланного файла.",
+        "import_wrong_file": "Нужно прислать именно файл (документ), не фото и не текст.",
     },
     "kz": {
         "choose_ui_lang": "🌐 Выберите язык бота / Тілді таңдаңыз / Choose bot language:",
@@ -150,6 +177,23 @@ TEXT = {
         "lbl_contact": "✉️ Байланыс:",
         "no_username": "(username жоқ, Telegram профилі арқылы жазыңыз)",
         "lang_changed": "Бот тілі қазақшаға ауыстырылды.",
+        "fallback_hint": "Түсінбедім 🙂 Жауап сәйкес келмесе — жалғастыру немесе қайта бастау үшін /start теріңіз.",
+        "export_denied": "Бұл команда тек бот әкімшісіне қолжетімді.",
+        "export_caption": "Дерекқор ({time} бойынша)",
+        "ask_contact_method": "Сізбен байланысудың қай тәсілі ыңғайлы?",
+        "btn_contact_telegram": "Telegram (@username)",
+        "btn_contact_phone": "📞 Телефон нөірі",
+        "btn_contact_email": "✉️ Email",
+        "no_username_notice": (
+            "Telegram-да username орнатылмаған (Telegram баптаулары → Профильді өзгерту → Username). "
+            "Басқа байланыс тәсілін таңдаңыз:"
+        ),
+        "ask_phone": "Телефон нөмірін енгізіңіз:",
+        "ask_email": "Email енгізіңіз:",
+        "import_prompt": "Дерекқорды қалпына келтіру үшін team_finder.db файлын келесі хабарламада (құжат ретінде) жіберіңіз.",
+        "import_denied": "Бұл команда тек бот әкімшісіне қолжетімді.",
+        "import_done": "Дерекқор жіберілген файлдан қалпына келтірілді.",
+        "import_wrong_file": "Дәл файл (құжат) жіберу керек, фото немесе мәтін емес.",
     },
     "en": {
         "choose_ui_lang": "🌐 Выберите язык бота / Тілді таңдаңыз / Choose bot language:",
@@ -202,6 +246,23 @@ TEXT = {
         "lbl_contact": "✉️ Contact:",
         "no_username": "(no username, message via their Telegram profile)",
         "lang_changed": "Bot language changed to English.",
+        "fallback_hint": "Didn't quite catch that 🙂 If your answer didn't fit, type /start to continue or restart.",
+        "export_denied": "This command is only available to the bot admin.",
+        "export_caption": "Database as of {time}",
+        "ask_contact_method": "What's the best way to reach you?",
+        "btn_contact_telegram": "Telegram (@username)",
+        "btn_contact_phone": "📞 Phone number",
+        "btn_contact_email": "✉️ Email",
+        "no_username_notice": (
+            "You don't have a Telegram username set (Telegram Settings → Edit Profile → Username). "
+            "Choose another way to be contacted:"
+        ),
+        "ask_phone": "Enter your phone number:",
+        "ask_email": "Enter your email:",
+        "import_prompt": "Send the team_finder.db file as a document in your next message to restore the database.",
+        "import_denied": "This command is only available to the bot admin.",
+        "import_done": "Database restored from the file you sent.",
+        "import_wrong_file": "Please send an actual file (document), not a photo or text.",
     },
 }
 
@@ -235,7 +296,9 @@ def db_init() -> None:
                 skills      TEXT,
                 looking_for TEXT,
                 language    TEXT,
-                status      TEXT NOT NULL DEFAULT 'active'
+                status      TEXT NOT NULL DEFAULT 'active',
+                contact_type  TEXT,
+                contact_value TEXT
             )
             """
         )
@@ -247,12 +310,16 @@ def db_init() -> None:
             )
             """
         )
-        # миграция для базы, созданной до появления полей language/status
+        # миграция для базы, созданной до появления полей language/status/contact
         cols = [r[1] for r in con.execute("PRAGMA table_info(profiles)").fetchall()]
         if "language" not in cols:
             con.execute("ALTER TABLE profiles ADD COLUMN language TEXT")
         if "status" not in cols:
             con.execute("ALTER TABLE profiles ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+        if "contact_type" not in cols:
+            con.execute("ALTER TABLE profiles ADD COLUMN contact_type TEXT")
+        if "contact_value" not in cols:
+            con.execute("ALTER TABLE profiles ADD COLUMN contact_value TEXT")
         con.commit()
 
 
@@ -283,8 +350,10 @@ def db_upsert_profile(user_id: int, username: str, data: dict) -> None:
     with closing(sqlite3.connect(DB_PATH)) as con:
         con.execute(
             """
-            INSERT INTO profiles (user_id, username, full_name, major, topic, skills, looking_for, language)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO profiles
+                (user_id, username, full_name, major, topic, skills, looking_for, language,
+                 contact_type, contact_value)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 username=excluded.username,
                 full_name=excluded.full_name,
@@ -292,7 +361,9 @@ def db_upsert_profile(user_id: int, username: str, data: dict) -> None:
                 topic=excluded.topic,
                 skills=excluded.skills,
                 looking_for=excluded.looking_for,
-                language=excluded.language
+                language=excluded.language,
+                contact_type=excluded.contact_type,
+                contact_value=excluded.contact_value
             """,
             (
                 user_id,
@@ -303,6 +374,8 @@ def db_upsert_profile(user_id: int, username: str, data: dict) -> None:
                 data["skills"],
                 data["looking_for"],
                 data["language"],
+                data["contact_type"],
+                data["contact_value"],
             ),
         )
         con.commit()
@@ -368,6 +441,12 @@ class Registration(StatesGroup):
     skills = State()
     looking_for = State()
     language = State()
+    contact_method = State()
+    contact_value = State()
+
+
+class AdminActions(StatesGroup):
+    awaiting_import = State()
 
 
 def ui_language_keyboard() -> InlineKeyboardMarkup:
@@ -403,8 +482,28 @@ def comm_language_display(lang: str, comm_lang_key: str | None) -> str:
     return LANGUAGE_LABELS.get(comm_lang_key) or (comm_lang_key or "—")
 
 
+def contact_method_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=t(lang, "btn_contact_telegram"), callback_data="contact:telegram")],
+            [InlineKeyboardButton(text=t(lang, "btn_contact_phone"), callback_data="contact:phone")],
+            [InlineKeyboardButton(text=t(lang, "btn_contact_email"), callback_data="contact:email")],
+        ]
+    )
+
+
+def contact_display(lang: str, row: sqlite3.Row) -> str:
+    contact_type = row["contact_type"] if "contact_type" in row.keys() else None
+    contact_value = row["contact_value"] if "contact_value" in row.keys() else None
+    if contact_type and contact_value:
+        return contact_value
+    # старые анкеты (до появления выбора контакта) — раньше показывали username напрямую
+    uname = row["username"] if "username" in row.keys() else None
+    return f"@{uname}" if uname else t(lang, "no_username")
+
+
 def profile_text(lang: str, row: sqlite3.Row) -> str:
-    uname = f"@{row['username']}" if row["username"] else t(lang, "no_username")
+    contact = contact_display(lang, row)
     comm_lang = comm_language_display(lang, row["language"] if "language" in row.keys() else None)
     status = row["status"] if "status" in row.keys() else "active"
     status_line = t(lang, "found_status_line") if status == "found" else ""
@@ -416,7 +515,7 @@ def profile_text(lang: str, row: sqlite3.Row) -> str:
         f"{t(lang, 'lbl_skills')} {row['skills']}\n"
         f"{t(lang, 'lbl_looking_for')} {row['looking_for']}\n"
         f"{t(lang, 'lbl_language')} {comm_lang}\n"
-        f"{t(lang, 'lbl_contact')} {uname}"
+        f"{t(lang, 'lbl_contact')} {contact}"
     )
 
 
@@ -510,14 +609,56 @@ async def reg_looking_for(message: Message, state: FSMContext) -> None:
 async def reg_language(callback: CallbackQuery, state: FSMContext) -> None:
     lang = await get_lang(callback.from_user.id)
     comm_lang_key = callback.data.split(":")[1]
-    data = await state.update_data(language=comm_lang_key)
-    db_upsert_profile(callback.from_user.id, callback.from_user.username or "", data)
+    await state.update_data(language=comm_lang_key)
+    await callback.message.edit_text(t(lang, "ask_contact_method"), reply_markup=contact_method_keyboard(lang))
+    await state.set_state(Registration.contact_method)
+    await callback.answer()
+
+
+async def finish_registration(user_id: int, username: str, state: FSMContext, lang: str) -> sqlite3.Row:
+    data = await state.get_data()
+    db_upsert_profile(user_id, username, data)
     await state.clear()
-    row = db_get_profile(callback.from_user.id)
-    await callback.message.edit_text(
+    return db_get_profile(user_id)
+
+
+@router.callback_query(Registration.contact_method, F.data.startswith("contact:"))
+async def reg_contact_method(callback: CallbackQuery, state: FSMContext) -> None:
+    lang = await get_lang(callback.from_user.id)
+    method = callback.data.split(":")[1]
+
+    if method == "telegram":
+        username = callback.from_user.username
+        if username:
+            await state.update_data(contact_type="telegram", contact_value=f"@{username}")
+            row = await finish_registration(callback.from_user.id, username or "", state, lang)
+            await callback.message.edit_text(
+                t(lang, "saved_intro") + "\n\n" + profile_text(lang, row) + "\n\n" + t(lang, "commands_hint")
+            )
+            await callback.answer()
+            return
+        await callback.message.edit_text(
+            t(lang, "no_username_notice"), reply_markup=contact_method_keyboard(lang)
+        )
+        await callback.answer()
+        return
+
+    # phone или email — просим ввести значение следующим сообщением
+    prompt_key = "ask_phone" if method == "phone" else "ask_email"
+    await state.update_data(contact_type=method)
+    await callback.message.edit_text(t(lang, prompt_key))
+    await state.set_state(Registration.contact_value)
+    await callback.answer()
+
+
+@router.message(Registration.contact_value)
+async def reg_contact_value(message: Message, state: FSMContext) -> None:
+    lang = await get_lang(message.from_user.id)
+    await state.update_data(contact_value=message.text.strip())
+    row = await finish_registration(message.from_user.id, message.from_user.username or "", state, lang)
+    await message.answer(
         t(lang, "saved_intro") + "\n\n" + profile_text(lang, row) + "\n\n" + t(lang, "commands_hint")
     )
-    await callback.answer()
 
 
 # ---------- browse / search ----------
@@ -645,6 +786,60 @@ async def cmd_delete(message: Message) -> None:
     lang = await get_lang(message.from_user.id)
     db_delete_profile(message.from_user.id)
     await message.answer(t(lang, "profile_deleted"))
+
+
+@router.message(Command("export"))
+async def cmd_export(message: Message) -> None:
+    lang = await get_lang(message.from_user.id)
+    if not ADMIN_USER_ID or str(message.from_user.id) != str(ADMIN_USER_ID):
+        await message.answer(t(lang, "export_denied"))
+        return
+    if not os.path.exists(DB_PATH):
+        await message.answer("team_finder.db ещё не создан — анкет пока нет.")
+        return
+    import datetime
+
+    caption = t(lang, "export_caption", time=datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"))
+    await message.answer_document(FSInputFile(DB_PATH), caption=caption)
+
+
+@router.message(Command("import"))
+async def cmd_import(message: Message, state: FSMContext) -> None:
+    lang = await get_lang(message.from_user.id)
+    if not ADMIN_USER_ID or str(message.from_user.id) != str(ADMIN_USER_ID):
+        await message.answer(t(lang, "import_denied"))
+        return
+    await message.answer(t(lang, "import_prompt"))
+    await state.set_state(AdminActions.awaiting_import)
+
+
+@router.message(AdminActions.awaiting_import, F.document)
+async def receive_import_file(message: Message, state: FSMContext) -> None:
+    lang = await get_lang(message.from_user.id)
+    if not ADMIN_USER_ID or str(message.from_user.id) != str(ADMIN_USER_ID):
+        await state.clear()
+        await message.answer(t(lang, "import_denied"))
+        return
+    await message.bot.download(message.document, destination=DB_PATH)
+    await state.clear()
+    await message.answer(t(lang, "import_done"))
+
+
+@router.message(AdminActions.awaiting_import)
+async def receive_import_wrong_type(message: Message) -> None:
+    lang = await get_lang(message.from_user.id)
+    await message.answer(t(lang, "import_wrong_file"))
+
+
+# ---------- fallback ----------
+# Ловит всё, что не подошло ни под один шаг анкеты или команду — например,
+# если состояние FSM сбросилось из-за перезапуска сервера. Без этого
+# обработчика бот в такой ситуации молчал бы, и выглядело бы как зависание.
+
+@router.message()
+async def fallback(message: Message) -> None:
+    lang = await get_lang(message.from_user.id)
+    await message.answer(t(lang, "fallback_hint"))
 
 
 # ---------- entrypoint ----------
