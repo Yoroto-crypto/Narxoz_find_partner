@@ -42,7 +42,11 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("team_finder")
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "PUT_YOUR_TOKEN_HERE")
-DB_PATH = os.path.join(os.path.dirname(__file__), "team_finder.db")
+# DB_DIR можно задать переменной окружения и указать на смонтированный
+# постоянный диск (Railway Volume) — иначе при каждом передеплое файл
+# базы будет создаваться заново в пустой файловой системе контейнера.
+DB_DIR = os.environ.get("DB_DIR", os.path.dirname(__file__))
+DB_PATH = os.path.join(DB_DIR, "team_finder.db")
 ADMIN_USER_ID = os.environ.get("ADMIN_USER_ID")  # твой Telegram user id, строкой
 
 router = Router()
